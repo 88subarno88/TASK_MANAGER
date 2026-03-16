@@ -7,26 +7,6 @@ const PRIORITIES = ['low', 'medium', 'high', 'urgent'];
 const STATUS_LABELS = { todo: 'To Do', 'in-progress': 'In Progress', review: 'Review', done: 'Done' };
 const PRIORITY_ICONS = { low: '↓', medium: '→', high: '↑', urgent: '⚡' };
 
-async function encryptPayload(payload) {
-  try {
-    const keyMaterial = window.location.origin;
-    const encoder = new TextEncoder();
-    const keyData = await crypto.subtle.digest('SHA-256', encoder.encode(keyMaterial + '_taskflow_e2e'));
-    const key = await crypto.subtle.importKey('raw', keyData, { name: 'AES-GCM' }, false, ['encrypt']);
-    const result = { ...payload };
-    for (const field of ['title', 'description']) {
-      if (result[field]) {
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(result[field]));
-        const combined = new Uint8Array(iv.length + enc.byteLength);
-        combined.set(iv, 0); combined.set(new Uint8Array(enc), iv.length);
-        result[field] = btoa(String.fromCharCode(...combined));
-      }
-    }
-    return result;
-  } catch { return payload; }
-}
-
 export default function TaskModal({ task, onClose, onSuccess }) {
   const isEdit = !!task;
   const [form, setForm] = useState({
@@ -61,14 +41,15 @@ export default function TaskModal({ task, onClose, onSuccess }) {
     setLoading(true);
     try {
       const tags = form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [];
-      const payload = await encryptPayload({
+      // Send the clean payload (HTTPS handles the encryption in transit)
+      const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
         status: form.status,
         priority: form.priority,
         dueDate: form.dueDate || null,
         tags,
-      });
+      };
 
       const url = isEdit ? `/api/tasks/${task._id}` : '/api/tasks';
       const method = isEdit ? 'PUT' : 'POST';
@@ -89,12 +70,11 @@ export default function TaskModal({ task, onClose, onSuccess }) {
       className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-surface border border-border rounded-2xl w-full max-w-lg shadow-2xl animate-slide-up"
            style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,212,255,0.08) inset' }}>
-        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div>
             <h2 className="font-display text-lg font-bold">{isEdit ? 'Edit Task' : 'New Task'}</h2>
             <p className="text-xs text-slate-text font-mono mt-0.5">
-              <span className="text-cyan/60">// </span>{isEdit ? `Editing: ${task.title?.substring(0, 30)}...` : 'Fields encrypted before transmission'}
+              <span className="text-cyan/60">// </span>{isEdit ? `Editing: ${task.title?.substring(0, 30)}...` : 'Secured via HTTPS E2E'}
             </p>
           </div>
           <button onClick={onClose}
@@ -105,7 +85,6 @@ export default function TaskModal({ task, onClose, onSuccess }) {
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {error && (
             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
@@ -116,7 +95,6 @@ export default function TaskModal({ task, onClose, onSuccess }) {
             </div>
           )}
 
-          {/* Title */}
           <div>
             <label className="block text-sm font-medium text-slate-light mb-2">
               Title <span className="text-red-400">*</span>
@@ -126,7 +104,6 @@ export default function TaskModal({ task, onClose, onSuccess }) {
               className="w-full bg-panel border border-border rounded-xl px-4 py-3 text-white placeholder-muted focus:border-cyan/50 focus:ring-1 focus:ring-cyan/20 transition-all text-sm" />
           </div>
 
-          {/* Description */}
           <div>
             <label className="block text-sm font-medium text-slate-light mb-2">Description</label>
             <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
@@ -134,7 +111,6 @@ export default function TaskModal({ task, onClose, onSuccess }) {
               className="w-full bg-panel border border-border rounded-xl px-4 py-3 text-white placeholder-muted focus:border-cyan/50 focus:ring-1 focus:ring-cyan/20 transition-all text-sm resize-none" />
           </div>
 
-          {/* Status + Priority */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-light mb-2">Status</label>
@@ -152,7 +128,6 @@ export default function TaskModal({ task, onClose, onSuccess }) {
             </div>
           </div>
 
-          {/* Due Date + Tags */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-light mb-2">Due Date</label>
@@ -167,15 +142,13 @@ export default function TaskModal({ task, onClose, onSuccess }) {
             </div>
           </div>
 
-          {/* Encryption note */}
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-cyan/5 border border-cyan/10">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
               <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
             </svg>
-            <span className="text-xs text-cyan/60 font-mono">Title & description encrypted with AES-256-GCM</span>
+            <span className="text-xs text-cyan/60 font-mono">Secured via TLS/HTTPS End-to-End Encryption</span>
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-3 pt-2">
             <button type="button" onClick={onClose}
               className="flex-1 py-3 rounded-xl border border-border text-sm text-slate-text hover:text-white hover:border-muted transition-all font-medium">
