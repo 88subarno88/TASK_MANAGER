@@ -1,6 +1,18 @@
 import prisma from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse, handleApiError, sanitizeInput } from '@/lib/api';
+import CryptoJS from 'crypto-js';
+
+function decryptIfNeeded(val) {
+  if (typeof val === 'string' && val.startsWith('U2FsdGVkX1')) {
+    try {
+      const bytes = CryptoJS.AES.decrypt(val, process.env.ENCRYPTION_KEY || 'TaskFlow_Enc_Key_32Chars_2026!!!');
+      const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+      return decrypted || val;
+    } catch(e) { return val; }
+  }
+  return val;
+}
 
 export async function GET(request, { params }) {
   try {
@@ -25,8 +37,11 @@ export async function PUT(request, { params }) {
     const body = await request.json();
     const updateData = {};
     
-    if (body.title) updateData.title = sanitizeInput(String(body.title));
-    if (body.description !== undefined) updateData.description = body.description ? sanitizeInput(String(body.description)) : null;
+    if (body.title) updateData.title = sanitizeInput(String(decryptIfNeeded(body.title)));
+    if (body.description !== undefined) {
+      const desc = decryptIfNeeded(body.description);
+      updateData.description = desc ? sanitizeInput(String(desc)) : null;
+    }
     if (body.status) {
         updateData.status = body.status;
         if (body.status === 'done' && task.status !== 'done') updateData.completedAt = new Date();

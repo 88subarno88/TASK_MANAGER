@@ -1,6 +1,18 @@
 import prisma from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { successResponse, errorResponse, handleApiError, sanitizeInput } from '@/lib/api';
+import CryptoJS from 'crypto-js';
+
+function decryptIfNeeded(val) {
+  if (typeof val === 'string' && val.startsWith('U2FsdGVkX1')) {
+    try {
+      const bytes = CryptoJS.AES.decrypt(val, process.env.ENCRYPTION_KEY || 'TaskFlow_Enc_Key_32Chars_2026!!!');
+      const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+      return decrypted || val;
+    } catch(e) { return val; }
+  }
+  return val;
+}
 
 const TASK_STATUSES = ['todo', 'in-progress', 'done'];
 
@@ -17,7 +29,6 @@ export async function GET(request) {
     const tasks = await prisma.task.findMany({ where, orderBy: { createdAt: 'desc' } });
     const filteredTasks = search ? tasks.filter(t => t.title?.toLowerCase().includes(search)) : tasks;
     
-    // Map id to _id so frontend doesn't break
     const formattedTasks = filteredTasks.map(t => ({ ...t, _id: t.id }));
     
     return successResponse(formattedTasks, 200, { pagination: { total: formattedTasks.length } });
@@ -28,7 +39,11 @@ export async function POST(request) {
   try {
     const user = requireAuth(request);
     const body = await request.json();
-    let { title, description, status, priority, dueDate, tags } = body;
+    
+    // Decrypt fields if the frontend encrypted them over the wire
+    let title = decryptIfNeeded(body.title);
+    let description = decryptIfNeeded(body.description);
+    let { status, priority, dueDate, tags } = body;
     
     title = sanitizeInput(String(title || ''));
     if (!title) return errorResponse('Title required', 400);
